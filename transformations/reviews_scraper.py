@@ -90,70 +90,80 @@ async def _crawl4ai_fetch(url: str) -> str:
         result = await crawler.arun(url=url)
         return result.markdown
 
-def scrape_with_crawl4ai_openai(asin: str, marketplace: str):
-    """Tier 2: Local Crawl4AI + OpenAI LLM Parsing (Fallback)"""
-    openai_key = os.environ.get("OPENAI_API_KEY")
-    if not openai_key:
-        logging.warning("No OPENAI_API_KEY found, skipping Crawl4AI + LLM fallback.")
-        return None
-
+def scrape_with_crawl4ai_css(asin: str, marketplace: str):
+    """Tier 2: Local Crawl4AI with pure CSS Extraction (100% Free)"""
     url = get_amazon_url(asin, marketplace)
-    logging.info(f"    [CRAWL4AI] Attempting local crawl for {url}")
+    logging.info(f"    [CRAWL4AI] Attempting local CSS extraction for {url}")
+    
+    from crawl4ai import AsyncWebCrawler
+    from crawl4ai.extraction_strategy import JsonCssExtractionStrategy
+    
+    schema = {
+        "name": "Amazon Reviews",
+        "baseSelector": "body",
+        "fields": [
+            {"name": "star_rating", "selector": "span[data-hook='rating-out-of-text']", "type": "text"},
+            {"name": "total_reviews", "selector": "span[data-hook='total-review-count']", "type": "text"},
+        ],
+        "lists": [
+            {
+                "name": "reviews",
+                "baseSelector": "div[data-hook='review']",
+                "fields": [
+                    {"name": "review_id", "selector": "div[data-hook='review']", "type": "attribute", "attribute": "id"},
+                    {"name": "rating", "selector": "i[data-hook='review-star-rating'] span.a-icon-alt", "type": "text"},
+                    {"name": "review_date", "selector": "span[data-hook='review-date']", "type": "text"},
+                    {"name": "title", "selector": "a[data-hook='review-title'] span:not(.a-icon-alt)", "type": "text"},
+                    {"name": "review_text", "selector": "span[data-hook='review-body'] span", "type": "text"}
+                ]
+            }
+        ]
+    }
     
     try:
-        # Run local chromium scraper asynchronously
-        markdown_content = asyncio.run(_crawl4ai_fetch(url))
-        
-        if not markdown_content or len(markdown_content) < 100:
-            logging.error("    [CRAWL4AI] Failed to extract meaningful markdown.")
+        async def fetch():
+            async with AsyncWebCrawler() as crawler:
+                strategy = JsonCssExtractionStrategy(schema)
+                result = await crawler.arun(url=url, extraction_strategy=strategy, bypass_cache=True)
+                return result.extracted_content
+                
+        extracted = asyncio.run(fetch())
+        if not extracted:
             return None
             
-        logging.info("    [CRAWL4AI] Successfully crawled page, sending to OpenAI for parsing...")
+        data_list = json.loads(extracted)
+        if not data_list:
+            return None
+            
+        data = data_list[0]
         
-        from openai import OpenAI
-        client = OpenAI(api_key=openai_key)
+        # Clean up text formats to match DB schema
+        def extract_num(text):
+            return float(''.join(c for c in str(text) if c.isdigit() or c == '.')) if text else 0
+            
+        cleaned = {
+            "star_rating": extract_num(data.get("star_rating", "0")),
+            "total_reviews": extract_num(data.get("total_reviews", "0")),
+            "one_star_pct": 0, "two_star_pct": 0, "three_star_pct": 0, "four_star_pct": 0, "five_star_pct": 0,
+            "reviews": []
+        }
         
-        prompt = f"""
-        Extract the Amazon customer reviews and overall rating metrics from the following markdown scraped from an Amazon Product Reviews page.
-        
-        Return ONLY a raw, valid JSON object that strictly adheres to this schema:
-        {{
-            "star_rating": 4.5,
-            "total_reviews": 120,
-            "one_star_pct": 5,
-            "two_star_pct": 2,
-            "three_star_pct": 8,
-            "four_star_pct": 15,
-            "five_star_pct": 70,
-            "reviews": [
-                {{
-                    "review_id": "string (extract from URL/ID if available, else omit)",
-                    "rating": 5,
-                    "review_date": "YYYY-MM-DD",
-                    "title": "string",
-                    "review_text": "string",
-                    "sentiment": "positive | neutral | negative"
-                }}
-            ]
-        }}
-        
-        Markdown Content:
-        {markdown_content[:20000]}  # Trim to avoid exceeding context
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={ "type": "json_object" }
-        )
-        
-        # Parse the JSON response
-        text = response.choices[0].message.content
-        return json.loads(text)
+        for r in data.get("reviews", []):
+            if r.get("review_text"):
+                cleaned["reviews"].append({
+                    "review_id": r.get("review_id", ""),
+                    "rating": extract_num(r.get("rating", "0")),
+                    "review_date": r.get("review_date", ""),
+                    "title": r.get("title", ""),
+                    "review_text": r.get("review_text", ""),
+                    "sentiment": "neutral"
+                })
+                
+        logging.info("    [CRAWL4AI] CSS Extraction successful!")
+        return cleaned
         
     except Exception as e:
-        logging.error(f"    [CRAWL4AI/LLM] Exception occurred: {e}")
+        logging.error(f"    [CRAWL4AI] Exception occurred: {e}")
         return None
 
 def scrape_with_firecrawl(asin: str, marketplace: str):
@@ -228,10 +238,10 @@ def run_reviews_scraper(asin: str, client_id: str, marketplace: str):
     # 1. ScrapeGraphAI (Primary Cloud)
     data = scrape_with_scrapergraph(asin, marketplace)
     
-    # 2. Crawl4AI + OpenAI (Local Fallback)
+    # 2. Crawl4AI + CSS Extraction (Local Fallback - 100% Free)
     if not data or not data.get("reviews"):
         logging.warning("    [!] ScrapeGraphAI failed. Falling back to Crawl4AI (Local).")
-        data = scrape_with_crawl4ai_openai(asin, marketplace)
+        data = scrape_with_crawl4ai_css(asin, marketplace)
         
     # 3. Firecrawl (Final Cloud Fallback)
     if not data or not data.get("reviews"):
