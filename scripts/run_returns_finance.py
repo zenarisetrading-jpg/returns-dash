@@ -126,12 +126,8 @@ def main():
             
         log.info(f"  [{client_id}] Found {len(missing_dates)} missing dates. Processing...")
         
-        try:
-            token = _generate_spapi_token(account["refresh_token"])
-        except Exception as e:
-            log.error(f"  [{client_id}] Failed to generate token: {e}")
-            continue
-
+        token_generated_at = 0.0
+        token = ""
         endpoint = f"https://{account['region_endpoint']}" if not account['region_endpoint'].startswith("http") else account['region_endpoint']
 
         # Loop over missing dates and execute python scripts as subprocesses
@@ -140,6 +136,16 @@ def main():
 
         for m_date in missing_dates:
             import time
+            
+            # Regenerate token if it's older than 50 minutes (3000 seconds)
+            if time.monotonic() - token_generated_at > 3000:
+                try:
+                    token = _generate_spapi_token(account["refresh_token"])
+                    token_generated_at = time.monotonic()
+                    log.info(f"  [{client_id}] Generated fresh SP-API Token.")
+                except Exception as e:
+                    log.error(f"  [{client_id}] Failed to generate token: {e}")
+                    break
             
             env = os.environ.copy()
             env["SP_API_TOKEN"] = token

@@ -5,8 +5,11 @@ import requests
 from supabase import create_client, Client
 from datetime import datetime, timezone
 import logging
-from dotenv import load_dotenv
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s  %(levelname)-13s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')

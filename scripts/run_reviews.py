@@ -2,8 +2,11 @@ import os
 import time
 import psycopg2
 import logging
-from dotenv import load_dotenv
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 from transformations.reviews_scraper import run_reviews_scraper
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s  %(levelname)-13s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
