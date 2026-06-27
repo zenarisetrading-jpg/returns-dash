@@ -17,7 +17,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s  %(levelname)-13s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
 def _db_client() -> Client:
-    url = os.environ.get("SUPABASE_URL")
+    url = os.environ.get("REACT_APP_SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
         raise ValueError("Missing Supabase credentials")
