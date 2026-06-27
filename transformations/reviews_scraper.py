@@ -90,11 +90,11 @@ async def _crawl4ai_fetch(url: str) -> str:
         result = await crawler.arun(url=url)
         return result.markdown
 
-def scrape_with_crawl4ai_anthropic(asin: str, marketplace: str):
-    """Tier 2: Local Crawl4AI + Anthropic LLM Parsing (Fallback)"""
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not anthropic_key:
-        logging.warning("No ANTHROPIC_API_KEY found, skipping Crawl4AI + LLM fallback.")
+def scrape_with_crawl4ai_openai(asin: str, marketplace: str):
+    """Tier 2: Local Crawl4AI + OpenAI LLM Parsing (Fallback)"""
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if not openai_key:
+        logging.warning("No OPENAI_API_KEY found, skipping Crawl4AI + LLM fallback.")
         return None
 
     url = get_amazon_url(asin, marketplace)
@@ -108,9 +108,11 @@ def scrape_with_crawl4ai_anthropic(asin: str, marketplace: str):
             logging.error("    [CRAWL4AI] Failed to extract meaningful markdown.")
             return None
             
-        logging.info("    [CRAWL4AI] Successfully crawled page, sending to Anthropic for parsing...")
+        logging.info("    [CRAWL4AI] Successfully crawled page, sending to OpenAI for parsing...")
         
-        client = Anthropic(api_key=anthropic_key)
+        from openai import OpenAI
+        client = OpenAI(api_key=openai_key)
+        
         prompt = f"""
         Extract the Amazon customer reviews and overall rating metrics from the following markdown scraped from an Amazon Product Reviews page.
         
@@ -139,21 +141,15 @@ def scrape_with_crawl4ai_anthropic(asin: str, marketplace: str):
         {markdown_content[:20000]}  # Trim to avoid exceeding context
         """
         
-        response = client.messages.create(
-            model="claude-3-haiku-20240307",
-            max_tokens=2000,
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
             temperature=0,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            response_format={ "type": "json_object" }
         )
         
         # Parse the JSON response
-        text = response.content[0].text
-        # Clean potential markdown block formatting
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0].strip()
-        elif "```" in text:
-            text = text.split("```")[1].strip()
-            
+        text = response.choices[0].message.content
         return json.loads(text)
         
     except Exception as e:
@@ -232,10 +228,10 @@ def run_reviews_scraper(asin: str, client_id: str, marketplace: str):
     # 1. ScrapeGraphAI (Primary Cloud)
     data = scrape_with_scrapergraph(asin, marketplace)
     
-    # 2. Crawl4AI + Anthropic (Local Fallback)
+    # 2. Crawl4AI + OpenAI (Local Fallback)
     if not data or not data.get("reviews"):
         logging.warning("    [!] ScrapeGraphAI failed. Falling back to Crawl4AI (Local).")
-        data = scrape_with_crawl4ai_anthropic(asin, marketplace)
+        data = scrape_with_crawl4ai_openai(asin, marketplace)
         
     # 3. Firecrawl (Final Cloud Fallback)
     if not data or not data.get("reviews"):
