@@ -193,11 +193,24 @@ function App() {
     setError(null);
     try {
       // 1. Fetch unified returns from public view
-      const { data: retData, error: retErr } = await supabase
-        .from('dashboard_returns')
-        .select('*');
-      if (retErr) throw retErr;
-      setReturnsData(retData || []);
+      let allRetData = [];
+      let from = 0;
+      let step = 999;
+      let hasMore = true;
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('dashboard_returns')
+          .select('*')
+          .range(from, from + step);
+        if (error) throw error;
+        allRetData = [...allRetData, ...(data || [])];
+        if (!data || data.length < step + 1) {
+          hasMore = false;
+        } else {
+          from += step + 1;
+        }
+      }
+      setReturnsData(allRetData);
 
       // 2. Fetch product listing health stats
       const { data: healthData, error: healthErr } = await supabase
