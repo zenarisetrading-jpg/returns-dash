@@ -285,21 +285,7 @@ def main():
                 except Exception as ingest_err:
                     log.error(f"    [!] Finance ingestion failed for {m_date}: {ingest_err}")
 
-            # 3. Run Financial Events Extractor & Ingestion
-            elapsed = time.monotonic() - last_submit_ts
-            if elapsed < RATE_LIMIT and last_submit_ts > 0:
-                time.sleep(RATE_LIMIT - elapsed)
 
-            log.info(f"    -> [FINANCIAL EVENTS] Pulling & Ingesting {m_date}")
-            try:
-                subprocess.run(
-                    [sys.executable, str(ROOT / "transformations" / "financial_events_spapi.py")],
-                    env=env, check=True
-                )
-                log.info(f"    -> [FINANCIAL EVENTS] Synced successfully into DB.")
-            except subprocess.CalledProcessError as e:
-                log.error(f"    [!] Financial events sync failed for {m_date}: {e}")
-            last_submit_ts = time.monotonic()
 
     log.info("═══════════════════════════════════════════════════════════")
     log.info("  Done.")
