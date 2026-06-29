@@ -1370,11 +1370,11 @@ function App() {
                         labelStyle={{ fontWeight: 'bold' }}
                       />
                       <Legend iconType="circle" wrapperStyle={{ fontSize: 11, paddingTop: 10 }} />
-                      <Area type="monotone" dataKey="Customer" stroke={RESPONSIBILITY_COLORS.Customer} fillOpacity={1} fill="url(#colorCustomer)" stackId="1" />
-                      <Area type="monotone" dataKey="Logistics" stroke={RESPONSIBILITY_COLORS.Logistics} fillOpacity={1} fill="url(#colorLogistics)" stackId="1" />
-                      <Area type="monotone" dataKey="Marketing" stroke={RESPONSIBILITY_COLORS.Marketing} fillOpacity={1} fill="url(#colorMarketing)" stackId="1" />
-                      <Area type="monotone" dataKey="Manufacturing" stroke={RESPONSIBILITY_COLORS.Manufacturing} fillOpacity={1} fill="url(#colorManufacturing)" stackId="1" />
-                      <Area type="monotone" dataKey="Unknown" stroke={RESPONSIBILITY_COLORS.Unknown} fillOpacity={1} fill="url(#colorUnknown)" stackId="1" />
+                      <Area type="monotone" dataKey="Customer" stroke={RESPONSIBILITY_COLORS.Customer} fillOpacity={1} fill="url(#colorCustomer)" />
+                      <Area type="monotone" dataKey="Logistics" stroke={RESPONSIBILITY_COLORS.Logistics} fillOpacity={1} fill="url(#colorLogistics)" />
+                      <Area type="monotone" dataKey="Marketing" stroke={RESPONSIBILITY_COLORS.Marketing} fillOpacity={1} fill="url(#colorMarketing)" />
+                      <Area type="monotone" dataKey="Manufacturing" stroke={RESPONSIBILITY_COLORS.Manufacturing} fillOpacity={1} fill="url(#colorManufacturing)" />
+                      <Area type="monotone" dataKey="Unknown" stroke={RESPONSIBILITY_COLORS.Unknown} fillOpacity={1} fill="url(#colorUnknown)" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
