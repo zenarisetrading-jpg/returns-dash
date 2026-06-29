@@ -19,8 +19,20 @@ def main():
         print("Missing required environment variables (SP_API_TOKEN, SP_API_ENDPOINT, ACCOUNT_ID, START_DATE, END_DATE)", file=sys.stderr)
         sys.exit(1)
 
-    supabase_url = os.getenv("REACT_APP_SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("REACT_APP_SUPABASE_ANON_KEY")
+    supabase_url = os.getenv("REACT_APP_SUPABASE_URL") or os.getenv("SUPABASE_URL")
+    if not supabase_url:
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            try:
+                import urllib.parse
+                parsed = urllib.parse.urlparse(db_url)
+                username = parsed.username
+                if username and '.' in username:
+                    project_ref = username.split('.')[-1]
+                    supabase_url = f"https://{project_ref}.supabase.co"
+            except Exception:
+                pass
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("REACT_APP_SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
     supabase: Client = create_client(supabase_url, supabase_key)
 
     headers = {
