@@ -164,6 +164,9 @@ def main():
                 )
             except subprocess.CalledProcessError as e:
                 log.error(f"    [!] Financial events sync failed for {m_date}: {e}")
+                if e.returncode == 43:
+                    log.warning(f"    [!] Account {client_id} is unauthorized (403 Forbidden). Skipping remaining dates for this account.")
+                    break
             last_submit_ts = time.monotonic()
 
     log.info("═══════════════════════════════════════════════════════════")

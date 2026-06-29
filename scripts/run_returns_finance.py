@@ -236,16 +236,45 @@ def main():
                 pull_success = True
             except subprocess.CalledProcessError as e:
                 log.error(f"    [!] Returns pull failed for {m_date}: {e}")
+                if e.returncode == 43:
+                    log.warning(f"    [!] Account {client_id} is unauthorized (403 Forbidden). Skipping remaining dates for this account.")
+                    break
             last_submit_ts = time.monotonic()
             
             if pull_success:
                 try:
-                    supa_url = os.getenv("REACT_APP_SUPABASE_URL")
-                    supa_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("REACT_APP_SUPABASE_ANON_KEY")
-                    supabase = create_client(supa_url, supa_key)
                     file_name = f"FBA_RETURNS_{m_date}_to_{m_date}.tsv"
-                    res = supabase.storage.from_("ingestion-raw").download(f"{client_id}/{file_name}")
-                    content = res.decode('utf-8')
+                    local_path = ROOT / "data" / "tmp" / file_name
+                    content = None
+                    if local_path.exists():
+                        try:
+                            content = local_path.read_text(encoding='utf-8')
+                            # Clean up local file after reading
+                            local_path.unlink()
+                            log.info(f"    -> [RETURNS] Read {file_name} from local temp file.")
+                        except Exception as local_read_err:
+                            log.warning(f"    [!] Failed to read local temp file: {local_read_err}")
+                    
+                    if content is None:
+                        supa_url = os.getenv("REACT_APP_SUPABASE_URL") or os.getenv("SUPABASE_URL")
+                        if not supa_url:
+                            db_url = os.getenv("DATABASE_URL")
+                            if db_url:
+                                try:
+                                    import urllib.parse
+                                    parsed = urllib.parse.urlparse(db_url)
+                                    username = parsed.username
+                                    if username and '.' in username:
+                                        project_ref = username.split('.')[-1]
+                                        supa_url = f"https://{project_ref}.supabase.co"
+                                except Exception:
+                                    pass
+                        supa_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("REACT_APP_SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
+                        supabase = create_client(supa_url, supa_key)
+                        res = supabase.storage.from_("ingestion-raw").download(f"{client_id}/{file_name}")
+                        content = res.decode('utf-8')
+                        log.info(f"    -> [RETURNS] Downloaded {file_name} from Supabase storage.")
+
                     with psycopg2.connect(_db_url()) as conn:
                         _ingest_returns(conn, client_id, content)
                         conn.commit()
@@ -268,16 +297,45 @@ def main():
                 pull_success = True
             except subprocess.CalledProcessError as e:
                 log.error(f"    [!] Finance pull failed for {m_date}: {e}")
+                if e.returncode == 43:
+                    log.warning(f"    [!] Account {client_id} is unauthorized (403 Forbidden). Skipping remaining dates for this account.")
+                    break
             last_submit_ts = time.monotonic()
 
             if pull_success:
                 try:
-                    supa_url = os.getenv("REACT_APP_SUPABASE_URL")
-                    supa_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("REACT_APP_SUPABASE_ANON_KEY")
-                    supabase = create_client(supa_url, supa_key)
                     file_name = f"LEDGER_{m_date}_to_{m_date}.tsv"
-                    res = supabase.storage.from_("ingestion-raw").download(f"{client_id}/{file_name}")
-                    content = res.decode('utf-8')
+                    local_path = ROOT / "data" / "tmp" / file_name
+                    content = None
+                    if local_path.exists():
+                        try:
+                            content = local_path.read_text(encoding='utf-8')
+                            # Clean up local file after reading
+                            local_path.unlink()
+                            log.info(f"    -> [FINANCE] Read {file_name} from local temp file.")
+                        except Exception as local_read_err:
+                            log.warning(f"    [!] Failed to read local temp file: {local_read_err}")
+                    
+                    if content is None:
+                        supa_url = os.getenv("REACT_APP_SUPABASE_URL") or os.getenv("SUPABASE_URL")
+                        if not supa_url:
+                            db_url = os.getenv("DATABASE_URL")
+                            if db_url:
+                                try:
+                                    import urllib.parse
+                                    parsed = urllib.parse.urlparse(db_url)
+                                    username = parsed.username
+                                    if username and '.' in username:
+                                        project_ref = username.split('.')[-1]
+                                        supa_url = f"https://{project_ref}.supabase.co"
+                                except Exception:
+                                    pass
+                        supa_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("REACT_APP_SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY")
+                        supabase = create_client(supa_url, supa_key)
+                        res = supabase.storage.from_("ingestion-raw").download(f"{client_id}/{file_name}")
+                        content = res.decode('utf-8')
+                        log.info(f"    -> [FINANCE] Downloaded {file_name} from Supabase storage.")
+
                     with psycopg2.connect(_db_url()) as conn:
                         _ingest_ledger(conn, client_id, content)
                         conn.commit()

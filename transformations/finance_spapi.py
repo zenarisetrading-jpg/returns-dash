@@ -60,7 +60,7 @@ def main():
     
     if resp.status_code == 403:
         print(f"⚠️ [{account_id}] Finance Pull Failed: Missing Permissions (Seller must re-authenticate)")
-        sys.exit(0) # Graceful exit so the runner can continue
+        sys.exit(43)
         
     if resp.status_code != 202:
         print(f"Failed to create report: {resp.status_code} - {resp.text}", file=sys.stderr)
@@ -76,7 +76,7 @@ def main():
         poll_resp = requests.get(poll_url, headers=headers)
         if poll_resp.status_code == 403:
             print(f"⚠️ [{account_id}] Finance Poll Failed: Missing Permissions (Seller must re-authenticate)")
-            sys.exit(0)
+            sys.exit(43)
             
         poll_resp.raise_for_status()
         status = poll_resp.json().get("processingStatus")
@@ -106,6 +106,17 @@ def main():
     if compression == "GZIP":
         content = gzip.decompress(content)
 
+    # Save locally to a temp file first for direct ingestion robustness
+    tmp_dir = os.path.join(os.path.dirname(__file__), "../data/tmp")
+    os.makedirs(tmp_dir, exist_ok=True)
+    local_path = os.path.join(tmp_dir, f"LEDGER_{start_date}_to_{end_date}.tsv")
+    try:
+        with open(local_path, "wb") as f:
+            f.write(content)
+        print(f"Successfully saved locally to {local_path}")
+    except Exception as local_err:
+        print(f"Warning: Failed to save locally: {local_err}", file=sys.stderr)
+
     print("Uploading TSV to Supabase ingestion-raw bucket...")
     file_path = f"{account_id}/LEDGER_{start_date}_to_{end_date}.tsv"
     
@@ -116,10 +127,9 @@ def main():
             content,
             file_options={"content-type": "text/tab-separated-values"}
         )
-        print(f"Successfully uploaded {file_path}")
+        print(f"Successfully uploaded {file_path} to Supabase storage")
     except Exception as e:
-        print(f"Failed to upload to Supabase: {str(e)}", file=sys.stderr)
-        sys.exit(1)
+        print(f"Warning: Failed to upload to Supabase storage: {str(e)}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

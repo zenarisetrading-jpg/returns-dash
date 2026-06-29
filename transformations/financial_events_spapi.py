@@ -256,6 +256,15 @@ def main():
             page += 1
             time.sleep(2) # Throttle to avoid rate limits
             
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 403:
+            print(f"Error fetching or ingesting financial events: 403 Client Error (Unauthorized/Forbidden)", file=sys.stderr)
+            conn.rollback()
+            sys.exit(43)
+        else:
+            print(f"Error fetching or ingesting financial events: {e}", file=sys.stderr)
+            conn.rollback()
+            sys.exit(1)
     except Exception as e:
         print(f"Error fetching or ingesting financial events: {e}", file=sys.stderr)
         conn.rollback()

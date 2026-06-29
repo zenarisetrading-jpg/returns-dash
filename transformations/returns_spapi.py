@@ -60,6 +60,8 @@ def main():
     resp = requests.post(create_url, headers=headers, json=payload)
     if resp.status_code != 202:
         print(f"Failed to create report: {resp.status_code} - {resp.text}", file=sys.stderr)
+        if resp.status_code == 403:
+            sys.exit(43)
         sys.exit(1)
         
     report_id = resp.json().get("reportId")
@@ -98,6 +100,17 @@ def main():
     if compression == "GZIP":
         content = gzip.decompress(content)
 
+    # Save locally to a temp file first for direct ingestion robustness
+    tmp_dir = os.path.join(os.path.dirname(__file__), "../data/tmp")
+    os.makedirs(tmp_dir, exist_ok=True)
+    local_path = os.path.join(tmp_dir, f"FBA_RETURNS_{start_date}_to_{end_date}.tsv")
+    try:
+        with open(local_path, "wb") as f:
+            f.write(content)
+        print(f"Successfully saved locally to {local_path}")
+    except Exception as local_err:
+        print(f"Warning: Failed to save locally: {local_err}", file=sys.stderr)
+
     print("Uploading TSV to Supabase ingestion-raw bucket...")
     file_path = f"{account_id}/FBA_RETURNS_{start_date}_to_{end_date}.tsv"
     
@@ -108,10 +121,9 @@ def main():
             content,
             file_options={"content-type": "text/tab-separated-values"}
         )
-        print(f"Successfully uploaded {file_path}")
+        print(f"Successfully uploaded {file_path} to Supabase storage")
     except Exception as e:
-        print(f"Failed to upload to Supabase: {str(e)}", file=sys.stderr)
-        sys.exit(1)
+        print(f"Warning: Failed to upload to Supabase storage: {str(e)}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
