@@ -478,7 +478,28 @@ function App() {
   const trendData = useMemo(() => {
     const aggregated = {};
     
-    // Initialize date keys to make sure we show lines
+    // 1. Get date range boundaries based on selected timeRange
+    const today = new Date();
+    const startDate = new Date();
+    startDate.setDate(today.getDate() - parseInt(timeRange));
+    
+    // 2. Initialize all intermediate dates with 0 values
+    const currentDate = new Date(startDate);
+    while (currentDate <= today) {
+      const dateKey = currentDate.toISOString().split('T')[0];
+      aggregated[dateKey] = {
+        date: dateKey,
+        Returns: 0,
+        Customer: 0,
+        Logistics: 0,
+        Manufacturing: 0,
+        Marketing: 0,
+        Unknown: 0
+      };
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    // 3. Populate with actual return data
     filteredReturns.forEach(item => {
       const rawDateStr = item.return_date; // Sourced as string format
       if (!rawDateStr) return;
@@ -506,7 +527,7 @@ function App() {
     });
 
     return Object.values(aggregated).sort((a, b) => a.date.localeCompare(b.date));
-  }, [filteredReturns]);
+  }, [filteredReturns, timeRange]);
 
   // Aggregate outcomes (dispositions)
   const dispositionData = useMemo(() => {
@@ -648,9 +669,14 @@ function App() {
         if (!matchedAsins.has(item.asin)) return false;
       }
 
+      // ONLY include active ASINs (which have active sales or returns in the returnsData/salesTraffic)
+      const hasReturns = returnsData.some(r => r.asin === item.asin && r.saddl_id === item.client_id);
+      const hasSales = salesTraffic.some(s => s.asin === item.asin && s.saddl_id === item.client_id);
+      if (!hasReturns && !hasSales) return false;
+
       return true;
     });
-  }, [listingHealth, selectedAccount, selectedCountry, selectedCategory, selectedSubCategory, asinMetadataMap, selectedProductSku, returnsData]);
+  }, [listingHealth, selectedAccount, selectedCountry, selectedCategory, selectedSubCategory, asinMetadataMap, selectedProductSku, returnsData, salesTraffic]);
 
   // Total cumulative reviews count for all matched catalog products
   const totalReviewsMetric = useMemo(() => {
