@@ -12,9 +12,11 @@ import os
 import sys
 import subprocess
 import requests
+import csv
 from datetime import date, timedelta
 from pathlib import Path
 import psycopg2
+from supabase import create_client
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -105,6 +107,70 @@ def _generate_spapi_token(refresh_token: str) -> str:
     token_resp.raise_for_status()
     return token_resp.json()["access_token"]
 
+def _ingest_returns(conn, account: str, content: str):
+    lines = content.strip().split('\n')
+    if not lines:
+        return
+    reader = csv.DictReader(lines, delimiter='\t')
+    with conn.cursor() as cur:
+        for row in reader:
+            return_date = row.get("return-date", "").split("T")[0]
+            if not return_date:
+                continue
+            country = "KSA" if "ksa" in account.lower() else "UAE"
+            reference_id = row.get("order-id")
+            cur.execute("""
+                INSERT INTO returns.fact_returns (
+                    return_date, asin, msku, fnsku, title, quantity, 
+                    fulfillment_center, disposition, reason, customer_comments, saddl_id, synced_at,
+                    reference_id, country, event_type
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s, 'CustomerReturns'
+                ) ON CONFLICT (reference_id, country, saddl_id) DO NOTHING
+            """, (
+                return_date, row.get("asin"), row.get("sku"), row.get("fnsku"),
+                row.get("product-name"), int(row.get("quantity", 0)) if row.get("quantity") else 0,
+                row.get("fulfillment-center-id"), row.get("detailed-disposition"),
+                row.get("reason"), row.get("customer-comments"), account, reference_id, country
+            ))
+
+def _ingest_ledger(conn, account: str, content: str):
+    lines = content.strip().split('\n')
+    if not lines:
+        return
+    reader = csv.DictReader(lines, delimiter='\t')
+    with conn.cursor() as cur:
+        for row in reader:
+            date_str = row.get("Date")
+            if not date_str:
+                continue
+            if "/" in date_str:
+                parts = date_str.split("/")
+                if len(parts) == 3:
+                    date_str = f"{parts[2]}-{parts[0]}-{parts[1]}"
+            country = row.get("Country")
+            if country == "AE":
+                country = "UAE"
+            elif country == "SA":
+                country = "KSA"
+            cur.execute("""
+                INSERT INTO returns.fact_returns (
+                    return_date, asin, msku, fnsku, title, event_type, reference_id,
+                    quantity, fulfillment_center, disposition, reason, country,
+                    reconciled_quantity, unreconciled_quantity, saddl_id, synced_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+                ) ON CONFLICT ON CONSTRAINT fact_returns_unique_event DO NOTHING
+            """, (
+                date_str, row.get("ASIN"), row.get("MSKU"), row.get("FNSKU"), row.get("Title"),
+                row.get("Event Type"), row.get("Reference ID") if row.get("Reference ID") else None,
+                int(row.get("Quantity", 0)) if row.get("Quantity") not in (None, "") else 0,
+                row.get("Fulfillment Center"), row.get("Disposition"), row.get("Reason"), country,
+                int(row.get("Reconciled Quantity", 0)) if row.get("Reconciled Quantity") not in (None, "") else None,
+                int(row.get("Unreconciled Quantity", 0)) if row.get("Unreconciled Quantity") not in (None, "") else None,
+                account
+            ))
+
 def main():
     log.info("═══════════════════════════════════════════════════════════")
     log.info("  Saddle Returns & Finance Daily Pipeline")
@@ -155,34 +221,84 @@ def main():
             env["END_DATE"] = m_date
             env["MARKETPLACE_ID_UAE"] = account["marketplace_id"]
             
-            # 1. Run Returns Extractor
+            # 1. Run Returns Extractor & Ingestion
             elapsed = time.monotonic() - last_submit_ts
             if elapsed < RATE_LIMIT and last_submit_ts > 0:
                 time.sleep(RATE_LIMIT - elapsed)
             
             log.info(f"    -> [RETURNS] Pulling {m_date}")
+            pull_success = False
             try:
                 subprocess.run(
                     [sys.executable, str(ROOT / "transformations" / "returns_spapi.py")],
                     env=env, check=True
                 )
+                pull_success = True
             except subprocess.CalledProcessError as e:
                 log.error(f"    [!] Returns pull failed for {m_date}: {e}")
             last_submit_ts = time.monotonic()
             
-            # 2. Run Finance Extractor
+            if pull_success:
+                try:
+                    supa_url = os.getenv("REACT_APP_SUPABASE_URL")
+                    supa_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("REACT_APP_SUPABASE_ANON_KEY")
+                    supabase = create_client(supa_url, supa_key)
+                    file_name = f"FBA_RETURNS_{m_date}_to_{m_date}.tsv"
+                    res = supabase.storage.from_("ingestion-raw").download(f"{client_id}/{file_name}")
+                    content = res.decode('utf-8')
+                    with psycopg2.connect(_db_url()) as conn:
+                        _ingest_returns(conn, client_id, content)
+                        conn.commit()
+                    log.info(f"    -> [RETURNS] Ingested {file_name} successfully into DB.")
+                except Exception as ingest_err:
+                    log.error(f"    [!] Returns ingestion failed for {m_date}: {ingest_err}")
+
+            # 2. Run Finance Extractor & Ingestion
             elapsed = time.monotonic() - last_submit_ts
             if elapsed < RATE_LIMIT and last_submit_ts > 0:
                 time.sleep(RATE_LIMIT - elapsed)
                 
             log.info(f"    -> [FINANCE] Pulling {m_date}")
+            pull_success = False
             try:
                 subprocess.run(
                     [sys.executable, str(ROOT / "transformations" / "finance_spapi.py")],
                     env=env, check=True
                 )
+                pull_success = True
             except subprocess.CalledProcessError as e:
                 log.error(f"    [!] Finance pull failed for {m_date}: {e}")
+            last_submit_ts = time.monotonic()
+
+            if pull_success:
+                try:
+                    supa_url = os.getenv("REACT_APP_SUPABASE_URL")
+                    supa_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("REACT_APP_SUPABASE_ANON_KEY")
+                    supabase = create_client(supa_url, supa_key)
+                    file_name = f"LEDGER_{m_date}_to_{m_date}.tsv"
+                    res = supabase.storage.from_("ingestion-raw").download(f"{client_id}/{file_name}")
+                    content = res.decode('utf-8')
+                    with psycopg2.connect(_db_url()) as conn:
+                        _ingest_ledger(conn, client_id, content)
+                        conn.commit()
+                    log.info(f"    -> [FINANCE] Ingested {file_name} successfully into DB.")
+                except Exception as ingest_err:
+                    log.error(f"    [!] Finance ingestion failed for {m_date}: {ingest_err}")
+
+            # 3. Run Financial Events Extractor & Ingestion
+            elapsed = time.monotonic() - last_submit_ts
+            if elapsed < RATE_LIMIT and last_submit_ts > 0:
+                time.sleep(RATE_LIMIT - elapsed)
+
+            log.info(f"    -> [FINANCIAL EVENTS] Pulling & Ingesting {m_date}")
+            try:
+                subprocess.run(
+                    [sys.executable, str(ROOT / "transformations" / "financial_events_spapi.py")],
+                    env=env, check=True
+                )
+                log.info(f"    -> [FINANCIAL EVENTS] Synced successfully into DB.")
+            except subprocess.CalledProcessError as e:
+                log.error(f"    [!] Financial events sync failed for {m_date}: {e}")
             last_submit_ts = time.monotonic()
 
     log.info("═══════════════════════════════════════════════════════════")
