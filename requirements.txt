@@ -1,5 +1,5 @@
 requests==2.31.0
-psycopg2-binary==2.9.9
+psycopg2-binary>=2.9.10
 supabase==2.4.5
 crawl4ai==0.4.247
 playwright>=1.49.0
