@@ -57,13 +57,14 @@ def extract_promotion_and_currency(promotion_list):
     return amount if amount != 0.0 else None, currency
 
 def ingest_financial_events(conn, account_id, events_payload):
+    default_marketplace_id = os.getenv("MARKETPLACE_ID") or os.getenv("MARKETPLACE_ID_UAE") or "A2VIGQ35RCS4UG"
     with conn.cursor() as cur:
         # 1. Process Shipment Events
         shipment_events = events_payload.get("ShipmentEventList", [])
         print(f"  Processing {len(shipment_events)} shipment events...")
         for event in shipment_events:
             order_id = event.get("AmazonOrderId")
-            marketplace_id = event.get("MarketplaceId")
+            marketplace_id = event.get("MarketplaceId") or default_marketplace_id
             posted_date = event.get("PostedDate")
             
             for item in event.get("ShipmentItemList", []):
@@ -108,7 +109,7 @@ def ingest_financial_events(conn, account_id, events_payload):
         print(f"  Processing {len(refund_events)} refund events...")
         for event in refund_events:
             order_id = event.get("AmazonOrderId")
-            marketplace_id = event.get("MarketplaceId")
+            marketplace_id = event.get("MarketplaceId") or default_marketplace_id
             posted_date = event.get("PostedDate")
             
             for item in event.get("ShipmentItemRefundList", []):
@@ -147,6 +148,7 @@ def ingest_financial_events(conn, account_id, events_payload):
         for event in service_fee_events:
             posted_date = event.get("PostedDate") or datetime.utcnow().isoformat()
             event_type = event.get("FeeDescription") or "ServiceFee"
+            marketplace_id = event.get("MarketplaceId") or default_marketplace_id
             
             for fee in event.get("FeeList", []):
                 fee_type = fee.get("FeeType")
@@ -160,12 +162,12 @@ def ingest_financial_events(conn, account_id, events_payload):
                 
                 cur.execute("""
                     INSERT INTO finance.fee_events (
-                        client_id, event_type, fee_type, amount, currency, posted_date, event_hash, created_at
+                        client_id, marketplace_id, event_type, fee_type, amount, currency, posted_date, event_hash, created_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, NOW()
+                        %s, %s, %s, %s, %s, %s, %s, %s, NOW()
                     ) ON CONFLICT (event_hash) DO NOTHING
                 """, (
-                    account_id, event_type, fee_type, amount, currency, posted_date, event_hash
+                    account_id, marketplace_id, event_type, fee_type, amount, currency, posted_date, event_hash
                 ))
 
         # 4. Process Adjustment Events
@@ -174,6 +176,7 @@ def ingest_financial_events(conn, account_id, events_payload):
         for event in adjustment_events:
             adjustment_type = event.get("AdjustmentType")
             posted_date = event.get("PostedDate")
+            marketplace_id = event.get("MarketplaceId") or default_marketplace_id
             
             for item in event.get("AdjustmentItemList", []):
                 sku = item.get("SellerSKU")
@@ -187,12 +190,12 @@ def ingest_financial_events(conn, account_id, events_payload):
                 
                 cur.execute("""
                     INSERT INTO finance.adjustment_events (
-                        client_id, adjustment_type, asin, sku, amount, currency, posted_date, event_hash, created_at
+                        client_id, marketplace_id, adjustment_type, asin, sku, amount, currency, posted_date, event_hash, created_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
                     ) ON CONFLICT (event_hash) DO NOTHING
                 """, (
-                    account_id, adjustment_type, asin, sku, amount, currency, posted_date, event_hash
+                    account_id, marketplace_id, adjustment_type, asin, sku, amount, currency, posted_date, event_hash
                 ))
 
 def main():
